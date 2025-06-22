@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.4.0
@@ -19,20 +17,47 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # JMX settings for monitoring
+      KAFKA_JMX_PORT: 9999
+      KAFKA_JMX_HOSTNAME: kafka
     ports:
       - 29092:29092
       - 9092:9092
+      - 9999:9999
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--list", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
 
   kafka-init:
     image: confluentinc/cp-kafka:7.4.0
     depends_on:
-      - kafka
-    entrypoint: /bin/sh -c
+      kafka:
+        condition: service_healthy
+    entrypoint: /bin/sh
     command: |
+      -c "
+      echo 'Waiting for Kafka...';
+      cub kafka-ready -b kafka:9092 1 60;
+      echo 'Creating topic with 50 partitions...';
+      kafka-topics --create --topic logs.events --partitions 50 --replication-factor 1 --config retention.ms=86400000 --if-not-exists --bootstrap-server kafka:9092;
+      echo 'Verifying topic creation...';
+      kafka-topics --describe --topic logs.events --bootstrap-server kafka:9092;
+      echo 'Topic setup completed successfully';
       "
-      cub kafka-ready -b kafka:9092 1 20 &&
-      kafka-topics --create --topic logs.events --partitions 50 --replication-factor 1 --if-not-exists --bootstrap-server kafka:9092
-      "
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    container_name: kafka-exporter
+    restart: unless-stopped
+    ports:
+      - "9308:9308"
+    environment:
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
 
   prometheus:
     image: prom/prometheus:latest
@@ -40,11 +65,19 @@ services:
       - 9090:9090
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
 
   grafana:
     image: grafana/grafana:latest
     ports:
       - 3000:3000
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
     volumes:
       - grafana_data:/var/lib/grafana
 
@@ -53,18 +86,75 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: producer
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      JAVA_OPTS: "-Xmx512m -Xms256m"
+    ports:
+      - "8081:8080"
     depends_on:
       - kafka-init
+    restart: unless-stopped
 
-  log-consumer:
+  log-consumer-1:
     build: .
     environment:
       SPRING_PROFILES_ACTIVE: consumer
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SPRING_APPLICATION_NAME: log-consumer-1
+      CONSUMER_INSTANCE_ID: consumer-1
+      JAVA_OPTS: "-Xmx512m -Xms256m -Dconsumer.instance.id=consumer-1"
+    ports:
+      - "8082:8080"
     depends_on:
-      - kafka-init
-    deploy:
-      replicas: 3
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  log-consumer-2:
+    build: .
+    environment:
+      SPRING_PROFILES_ACTIVE: consumer
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SPRING_APPLICATION_NAME: log-consumer-2
+      CONSUMER_INSTANCE_ID: consumer-2
+      JAVA_OPTS: "-Xmx512m -Xms256m -Dconsumer.instance.id=consumer-2"
+    ports:
+      - "8083:8080"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  log-consumer-3:
+    build: .
+    environment:
+      SPRING_PROFILES_ACTIVE: consumer
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SPRING_APPLICATION_NAME: log-consumer-3
+      CONSUMER_INSTANCE_ID: consumer-3
+      JAVA_OPTS: "-Xmx512m -Xms256m -Dconsumer.instance.id=consumer-3"
+    ports:
+      - "8084:8080"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
 
 volumes:
   grafana_data:
