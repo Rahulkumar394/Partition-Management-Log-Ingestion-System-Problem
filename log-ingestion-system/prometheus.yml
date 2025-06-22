@@ -1,34 +1,38 @@
 global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
+  scrape_interval: 15s     # How often to scrape targets
+  evaluation_interval: 15s # How often to evaluate alert rules
 
 rule_files:
-  # - "first_rules.yml"
-  # - "second_rules.yml"
+# Example: Add alert rules here if needed
+# - "alerts.yml"
 
 scrape_configs:
+  # 🔹 Kafka Exporter (for consumer lag, topic metrics, etc.)
   - job_name: 'kafka-exporter'
-    static_configs:
-      - targets: ['kafka-exporter:9308']
     scrape_interval: 10s
     metrics_path: '/metrics'
+    static_configs:
+      - targets: ['kafka-exporter:9308']
 
+  # 🔹 Spring Boot Kafka Producer Metrics
   - job_name: 'log-producer'
+    scrape_interval: 10s
     metrics_path: '/actuator/prometheus'
     static_configs:
       - targets: ['log-producer:8080']
-    scrape_interval: 10s
 
+  # 🔹 Spring Boot Kafka Consumers (3 instances)
   - job_name: 'log-consumers'
+    scrape_interval: 10s
     metrics_path: '/actuator/prometheus'
     static_configs:
-      - targets: 
+      - targets:
           - 'log-consumer-1:8080'
           - 'log-consumer-2:8080'
           - 'log-consumer-3:8080'
-    scrape_interval: 10s
 
+  # 🔹 Kafka JMX Exporter (for broker metrics like ISR, topic size)
   - job_name: 'kafka-jmx'
+    scrape_interval: 15s
     static_configs:
       - targets: ['kafka:9999']
-    scrape_interval: 15s
